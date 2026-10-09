@@ -1,5 +1,6 @@
 package taskscheduler;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -13,12 +14,22 @@ public class TaskScheduler {
     private final DelayQueue<DelayedTask> taskQueue;
     private final ConcurrentHashMap<UUID, ScheduledTask> taskRegistry;
     private final ExecutorService executor;
-    private final Thread dispatcher;
+    private final ScheduledExecutorService cleanupExecutor;
+    private Thread dispatcher;
     private final Semaphore semaphore;
+    private volatile SchedulerState state = SchedulerState.NEW;
 
-    private final LongSupplier clock;
+    private final LongSupplier nanoClock;
+    private final Clock wallClock;
 
+    private final Duration retentionPeriod = Duration.ofHours(24);
+
+    //production constructor
     public TaskScheduler(int maxWorkers){
+        this(maxWorkers, Clock.systemUTC(), System::nanoTime);
+    }
+
+    public TaskScheduler(int maxWorkers, Clock wallClock, LongSupplier nanoClock){
 
         if(maxWorkers <= 0){
             throw new IllegalArgumentException(
@@ -30,19 +41,67 @@ public class TaskScheduler {
         this.taskRegistry = new ConcurrentHashMap<>();
 
         this.executor = Executors.newFixedThreadPool(maxWorkers);
+        this.cleanupExecutor = Executors.newSingleThreadScheduledExecutor();
         this.semaphore = new Semaphore(maxWorkers);
 
-        this.clock = System::nanoTime;
+        this.nanoClock = nanoClock;
+        this.wallClock = wallClock;
+    }
 
-        this.dispatcher = new Thread(
+    //start the scheduler
+    public synchronized void start(){
+        if(state != SchedulerState.NEW){
+            throw new IllegalStateException("Scheduler cannot be started");
+        }
+        dispatcher = new Thread(
                 this::dispatchTasks,
                 "task-dispatcher"
         );
+        dispatcher.start();
+        state = SchedulerState.RUNNING;
 
-        this.dispatcher.start();
+        //schedule cleanup executor
+        cleanupExecutor.scheduleAtFixedRate(
+                this::cleanupCompletedTasks,
+                1,
+                1,
+                TimeUnit.HOURS
+        );
     }
 
-    public UUID scheduleAfter(Runnable task, Duration delay){
+    //shutdown the scheduler
+    public synchronized void shutdown(){
+        if(state == SchedulerState.SHUTDOWN){
+            return;
+        }
+
+        state = SchedulerState.SHUTDOWN;
+
+        if(dispatcher != null){
+            dispatcher.interrupt();
+        }
+
+        executor.shutdownNow();
+
+        //cancel every task that hasnt been started
+        for(ScheduledTask task : taskRegistry.values()){
+            task.cancelIfPending();
+        }
+
+        cleanupExecutor.shutdownNow();
+    }
+
+    //separate await from shutdown so client will call based on needs
+    public boolean awaitTermination(long timeout, TimeUnit unit) throws InterruptedException{
+        return executor.awaitTermination(timeout, unit);
+    }
+
+    public synchronized UUID scheduleAfter(Runnable task, Duration delay){
+        //check if scheduler is running
+        if(state != SchedulerState.RUNNING){
+            throw new IllegalStateException("Scheduler is not running");
+        }
+
         // validates inputs, creates ScheduledTask instance and returns UUID
         Objects.requireNonNull(task, "Task cannot be null");
         Objects.requireNonNull(delay, "Delay cannot be null");
@@ -53,7 +112,7 @@ public class TaskScheduler {
             );
         }
         UUID taskId = UUID.randomUUID();
-        Instant scheduledTime = Instant.now().plus(delay);
+        Instant scheduledTime = Instant.now(this.wallClock).plus(delay);
 
         ScheduledTask scheduledTask = new ScheduledTask(
                 taskId,
@@ -64,7 +123,7 @@ public class TaskScheduler {
         DelayedTask delayedTask = new DelayedTask(
                 scheduledTask,
                 delay.toNanos(),
-                clock
+                nanoClock
         );
         taskQueue.put(delayedTask);
         taskRegistry.put(taskId, scheduledTask);
@@ -72,12 +131,17 @@ public class TaskScheduler {
         return taskId;
     }
 
-    public UUID schedule(Runnable task, Instant executionTime){
+    public synchronized UUID schedule(Runnable task, Instant executionTime){
+
+        //check if scheduler is running
+        if(state != SchedulerState.RUNNING){
+            throw new IllegalStateException("Scheduler is not running");
+        }
 
         Objects.requireNonNull(executionTime, "Execution time cannot be null");
 
         Duration delay = Duration.between(
-                Instant.now(),
+                Instant.now(this.wallClock),
                 executionTime
         );
         //if execution time is in the past, add delay as 0
@@ -101,13 +165,17 @@ public class TaskScheduler {
     }
 
     private void executeTask(ScheduledTask task){
-        task.setStatus(TaskStatus.RUNNING);
+
+        //Dont execute tasks marked as cancelled
+        if(!task.markRunning()){
+            return;
+        }
 
         try{
             task.getTask().run();
-            task.setStatus(TaskStatus.COMPLETED);
-        } catch (Throwable t){
-            task.setStatus(TaskStatus.FAILED);
+            task.markCompleted();
+        } catch (Exception e){
+            task.markFailed();
             //Log the failure
         }
     }
@@ -115,17 +183,21 @@ public class TaskScheduler {
     private void dispatchTasks(){
         while(!Thread.currentThread().isInterrupted()){
             boolean permitAcquired = false;
+            DelayedTask delayedTask = null;
             try{
                 // Wait until a worker slot is available
                 semaphore.acquire();
                 permitAcquired = true;
 
                 //wait until earliest task becomes due
-                DelayedTask delayedTask = taskQueue.take();
+                delayedTask = taskQueue.take();
+                // Effectively final variable for lambda
+                DelayedTask currentTask = delayedTask;
 
                 executor.execute(() -> {
                     try{
-                        executeTask(delayedTask.getTask());
+                        //noinspection ReassignedVariable
+                        executeTask(currentTask.getTask());
                     }
                     finally {
                         semaphore.release();
@@ -141,6 +213,9 @@ public class TaskScheduler {
                 // Can happen when the executor is shutting down.
                 // A rejected task has already left the DelayQueue.
                 // Shutdown handling must decide whether to requeue it.
+                if(delayedTask != null){
+                    delayedTask.getTask().cancelIfPending();
+                }
                 break;
             } finally {
                 if(permitAcquired){
@@ -148,5 +223,25 @@ public class TaskScheduler {
                 }
             }
         }
+    }
+
+    private void cleanupCompletedTasks(){
+        Instant cutoff = Instant.now(wallClock).minus(retentionPeriod);
+
+        taskRegistry.entrySet().removeIf(entry -> {
+            ScheduledTask task = entry.getValue();
+            TaskStatus status = task.getStatus();
+
+            boolean terminal =
+                    status == TaskStatus.COMPLETED ||
+                    status == TaskStatus.FAILED ||
+                    status == TaskStatus.CANCELLED;
+
+            Instant completedAt = task.getCompletedAt();
+
+            return terminal
+                    && completedAt != null
+                    && !completedAt.isAfter(cutoff);
+        });
     }
 }
