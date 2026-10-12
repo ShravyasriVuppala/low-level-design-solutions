@@ -6,6 +6,7 @@ public class Compartment {
 
     public Compartment(CompartmentSize size) {
         this.size = size;
+        this.status = CompartmentStatus.AVAILABLE;
     }
 
     public CompartmentStatus getStatus() {

@@ -17,4 +17,12 @@ public class AccessToken {
     public Compartment getCompartment() {
         return compartment;
     }
+
+    public Date getExpirationDate() {
+        return expirationDate;
+    }
+
+    public String getCode() {
+        return code;
+    }
 }
