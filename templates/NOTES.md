@@ -2,13 +2,15 @@
 
 ## Clarifying questions & answers
 
-## Functional requirements
+## Requirements
 
-## Non-functional requirements / constraints
+## Out of SCope
 
 ## Entities & relationships
 
-## Class diagram (rough)
+## Class design
+
+## APIs
 
 ## Design patterns used (and why)
 
