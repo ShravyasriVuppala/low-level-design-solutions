@@ -39,3 +39,20 @@ Strategy - supports multiple rate limiting behaviors
 Factory - choose rate limiter based on user tier
 
 ## Trade-offs / what I'd do with more time
+
+## Takeaways
+- Separate policy from state: share immutable tier configs, but keep counters/tokens per user.
+- Strategy pattern: use a common RateLimiter interface for interchangeable algorithms.
+- Simple factory: create the correct limiter from its algorithm-specific configuration.
+- Thread safety: ConcurrentHashMap protects initialization; per-user synchronization protects check-and-update.
+- Fixed window: reset the counter after expiry; remember the boundary-burst limitation.
+- Token bucket: refill lazily using elapsed time, preserve fractional tokens, and cap at capacity.
+- Time measurement: use System.nanoTime() for elapsed durations.
+- Retry-after: calculate time until window reset or the next full token; round upward.
+- Records: concise data classes with generated constructors, accessors, equals(), hashCode(), and toString().
+- Compact constructors: validate record parameters before Java automatically assigns the fields.
+- Marker interfaces: group related types without requiring shared methods.
+- Static factory methods: create objects without needing a factory instance.
+- instanceof pattern matching: check a type and bind a typed variable without an explicit cast.
+- computeIfAbsent() and lambdas: create and store a value when its key is missing; the lambda receives that key.
+- synchronized: protect a sequence of state changes using the instance’s lock.

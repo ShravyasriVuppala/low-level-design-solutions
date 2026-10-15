@@ -141,3 +141,10 @@ The main trade-off is that this is an in-memory, single-process scheduler,
 so tasks aren't durable. With more time, I'd prioritize persistence and 
 recovery, configurable retries, and observability. I'd also consider more 
 advanced scheduling and concurrency optimizations if the workload grows."
+
+## Takeaways
+- DelayQueue
+- Semaphore to create backpressure
+- Not from here but concept to know - LinkedBlockingQueue<> makes the thread sleep 
+and not use CPU until there is something to take() 
+- Bounded BlockingQueue to create back pressure as it is by default unbounded
