@@ -18,6 +18,10 @@ public class Board {
        return grid[0][column] == null;
     }
 
+    void clearCell(int row, int col){
+        grid[row][col] = null;
+    }
+
     //place disc in the column and return row
     int placeDisc(int column, DiscColor color){
         if(!canPlace(column)){

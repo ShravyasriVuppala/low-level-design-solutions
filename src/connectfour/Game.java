@@ -1,12 +1,16 @@
 package connectfour;
 
+import java.util.Stack;
+
 public class Game {
     private final Board board;
     private final Player player1, player2;
     private GameState status;
     private Player winner, currentPlayer;
+    private final Stack<Move> moves;
 
     public Game(Player player1, Player player2) {
+        this.moves = new Stack<>();
         this.board = new Board(6, 7); //can inject into game constructor
         this.player1 = player1;
         this.player2 = player2;
@@ -40,6 +44,10 @@ public class Game {
         if(row == -1){
             return false;
         }
+        //Create move and add to stack
+        Move move = new Move(row, column, player.discColor());
+        moves.push(move);
+
         //check win
         if(board.checkWin(player.discColor(), row, column)){
             status = GameState.WON;
@@ -54,5 +62,12 @@ public class Game {
             currentPlayer = currentPlayer == player1 ? player2 : player1;
         }
         return true;
+    }
+
+    public void undoMove(){
+        //pop from stack, clear cell on board and revert current player
+        Move move = moves.pop();
+        board.clearCell(move.getRow(), move.getColumn());
+        currentPlayer = currentPlayer == player1 ? player2 : player1;
     }
 }
