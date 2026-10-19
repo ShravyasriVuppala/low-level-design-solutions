@@ -1,4 +1,7 @@
 package inventorymanagementlld;
 
-public class AlgoConfig {
+public record AlgoConfig (
+        int threshold,
+        AlertListener listener
+){
 }

@@ -16,7 +16,7 @@ public class Warehouse {
     boolean addStock(String productId, int quantity){
         //get stock
         synchronized (this){
-            int available = inventory.get(productId);
+            int available = inventory.getOrDefault(productId, 0);
             inventory.put(productId, available + quantity);
         }
         return true;
