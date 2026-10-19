@@ -20,14 +20,14 @@
 ## Out of SCope
 
 ## Entities & relationships
-RateLimiterService - owns clientID -> Strategy mapping
+ratelimiter.RateLimiterService - owns clientID -> Strategy mapping
 RateLimitConfig - Holds algorithm <-> limit settings. Limit Settings/Bucket capacity and Refill rate
-RateLimiter  - Interface for rate limiting strategies. Defines allowRequest()
+ratelimiter.RateLimiter  - Interface for rate limiting strategies. Defines allowRequest()
 FixedWindowLimiter - Request count and current window start
 TokenBucketLimiter - Available tokens and last refill time
 UserTier - enum  
 
-RateLimiterFactory - supporting entity rather than a domain entity. 
+ratelimiter.RateLimiterFactory - supporting entity rather than a domain entity. 
 
 ## Class design
 
@@ -42,7 +42,7 @@ Factory - choose rate limiter based on user tier
 
 ## Takeaways
 - Separate policy from state: share immutable tier configs, but keep counters/tokens per user.
-- Strategy pattern: use a common RateLimiter interface for interchangeable algorithms.
+- Strategy pattern: use a common ratelimiter.RateLimiter interface for interchangeable algorithms.
 - Simple factory: create the correct limiter from its algorithm-specific configuration.
 - Thread safety: ConcurrentHashMap protects initialization; per-user synchronization protects check-and-update.
 - Fixed window: reset the counter after expiry; remember the boundary-burst limitation.
